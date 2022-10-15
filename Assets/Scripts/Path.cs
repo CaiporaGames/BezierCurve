@@ -23,6 +23,39 @@ public class Path
         };
     }
 
+    public bool IsClosed
+    {
+        get
+        {
+            return isClosed;
+        }
+        set
+        {
+            if(isClosed != value)
+            {
+                isClosed = value;
+
+                if(isClosed)
+                {
+                    points.Add(points[points.Count-1]*2-points[points.Count-2]);
+                    points.Add(points[0]*2-points[1]);
+
+                    if(autoSetControlsPoints)
+                    {
+                        AutoSetAnchorControlPoint(0);
+                        AutoSetAnchorControlPoint(points.Count-3);
+                    }
+                }
+                else
+                {
+                    points.RemoveRange(points.Count-2,2);
+                    if(autoSetControlsPoints)
+                        AutoSetStartAndEndControls();
+                }
+            }
+        }
+    }
+
     public Vector2 this[int i]
     {
         get
@@ -49,6 +82,7 @@ public class Path
             }
         }
     }
+
 
     public int NumPoints
     {
@@ -128,28 +162,6 @@ public class Path
 
     }
 
-    public void ToggleClosed()
-    {
-        isClosed = !isClosed;
-
-        if(isClosed)
-        {
-            points.Add(points[points.Count-1]*2-points[points.Count-2]);
-            points.Add(points[0]*2-points[1]);
-
-            if(autoSetControlsPoints)
-            {
-                AutoSetAnchorControlPoint(0);
-                AutoSetAnchorControlPoint(points.Count-3);
-            }
-        }
-        else
-        {
-            points.RemoveRange(points.Count-2,2);
-            if(autoSetControlsPoints)
-                AutoSetStartAndEndControls();
-        }
-    }
 
     void AutoSetAllAffectedControlPoints(int updatedAnchorPonit)
     {
@@ -221,5 +233,86 @@ public class Path
             points[1] = (points[0]+points[2])*0.5f;
             points[points.Count-2] = (points[points.Count-1] + points[points.Count-3]) * 0.5f;
         }
+    }
+
+    public void SplitSegment(Vector2 anchorposition, int segmentIndex)
+    {
+        points.InsertRange(segmentIndex*3+2, new Vector2[]
+        {
+            Vector2.zero, anchorposition, Vector2.zero
+        });
+
+        if(autoSetControlsPoints)
+        {
+            AutoSetAllAffectedControlPoints(segmentIndex*3+3);
+        }
+        else
+        {
+            AutoSetAnchorControlPoint(segmentIndex*3+3);
+        }
+    }
+
+    public void DeleteSegment(int anchorIndex)
+    {
+        if(NumSegments > 2 || !isClosed && NumSegments > 1)
+        {
+            if(anchorIndex == 0)
+            {
+                if(isClosed)
+                {
+                    points[points.Count-1] = points[2];
+                }
+                points.RemoveRange(0,3);
+            }
+            else if(anchorIndex == points.Count-1 && !isClosed)
+            {
+                points.RemoveRange(anchorIndex-2, 3);
+            }
+            else
+            {
+                points.RemoveRange(anchorIndex-1, 3);
+            }
+        }
+    }
+    Vector2[] p;
+    float t = 0, overShootDistance, controlNetLenth, estimatedCurveLength, increment;
+    Vector2 newEvenSpacedPoint;
+    int divisions = 0;
+    public Vector2[] CalculateEvenlySpacedPoints(float spacing, float resolution=1)
+    {
+        List<Vector2> evenSpacedPoints = new List<Vector2>();
+        evenSpacedPoints.Add(points[0]);
+        Vector2 previousPoint = points[0];
+        float distanceSinceLastPoint = 0;
+
+        for(int segmentIndex = 0; segmentIndex < NumSegments; segmentIndex++)
+        {
+            p = GetPointsInSegment(segmentIndex);
+            controlNetLenth = Vector2.Distance(p[0], p[1]) + Vector2.Distance(p[1],p[2]) + Vector2.Distance(p[2],p[3]);
+            estimatedCurveLength = Vector2.Distance(p[0],p[3])+controlNetLenth*0.5f;
+            divisions = Mathf.CeilToInt(estimatedCurveLength*resolution*10);
+            t = 0;
+            increment = 1f/divisions;
+            while(t <= 1)
+            {
+                t += increment;
+                Vector2 pointOnCurve = Bezier.EvaluateCubic(p[0],p[1],p[2],p[3],t);
+                distanceSinceLastPoint += Vector2.Distance(previousPoint, pointOnCurve);
+
+                while(distanceSinceLastPoint >= spacing)//if the point goes beyond the right position, make it go back 
+                {
+                    overShootDistance = distanceSinceLastPoint - spacing;
+                    newEvenSpacedPoint = pointOnCurve + (previousPoint-pointOnCurve).normalized * overShootDistance;
+                    evenSpacedPoints.Add(newEvenSpacedPoint);
+                    distanceSinceLastPoint = overShootDistance;
+                    previousPoint = newEvenSpacedPoint;
+                }
+
+                previousPoint = pointOnCurve;
+            }
+            
+        }
+
+        return evenSpacedPoints.ToArray();
     }
 }
